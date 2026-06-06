@@ -1,3 +1,4 @@
+import './globals';
 import React from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { AuthProvider, useAuth } from './src/context/AuthContext';

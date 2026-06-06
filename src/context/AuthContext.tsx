@@ -1,11 +1,11 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { setupDatabase, createUser, findUserByEmail } from '../lib/database';
 import { UserRole } from '../types';
 
 interface User {
   name: string;
   email: string;
-  password: string;
   role: UserRole;
 }
 
@@ -21,66 +21,58 @@ interface AuthContextData {
 
 const AuthContext = createContext<AuthContextData>({} as AuthContextData);
 
+const DEMO_USERS: Record<string, { name: string; password: string; role: UserRole }> = {
+  'admin@sus.gov.br':      { name: 'Administrador',       password: '1234', role: 'admin' },
+  'gestor@sus.gov.br':     { name: 'Gestor Hospitalar',   password: '1234', role: 'gestor' },
+  'supervisor@sus.gov.br': { name: 'Supervisor de Saude', password: '1234', role: 'supervisor' },
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const stored = await AsyncStorage.getItem('current_user');
-        if (stored) setUser(JSON.parse(stored));
-      } catch {}
+    setupDatabase();
+    AsyncStorage.getItem('current_user').then(stored => {
+      if (stored) setUser(JSON.parse(stored));
       setLoading(false);
-    })();
+    });
   }, []);
 
   const signUp = async (name: string, email: string, password: string) => {
-    const existing = await AsyncStorage.getItem(`user_${email}`);
-    if (existing) throw new Error('Este e-mail ja esta cadastrado.');
-    const newUser: User = { name, email, password, role: 'paciente' };
-    await AsyncStorage.setItem(`user_${email}`, JSON.stringify(newUser));
+    createUser(name, email, password);
+    const newUser = { name, email, role: 'paciente' as UserRole };
     await AsyncStorage.setItem('current_user', JSON.stringify(newUser));
     setUser(newUser);
   };
 
   const signIn = async (email: string, password: string) => {
-    if (email === 'admin@sus.gov.br' && password === '1234') {
-      const adminUser: User = { name: 'Administrador', email, password, role: 'admin' };
-      await AsyncStorage.setItem('current_user', JSON.stringify(adminUser));
-      setUser(adminUser);
+    const demo = DEMO_USERS[email];
+    if (demo) {
+      if (demo.password !== password) throw new Error('Senha incorreta.');
+      const u = { name: demo.name, email, role: demo.role };
+      await AsyncStorage.setItem('current_user', JSON.stringify(u));
+      setUser(u);
       return;
     }
-    if (email === 'gestor@sus.gov.br' && password === '1234') {
-      const gestorUser: User = { name: 'Gestor Hospitalar', email, password, role: 'gestor' };
-      await AsyncStorage.setItem('current_user', JSON.stringify(gestorUser));
-      setUser(gestorUser);
-      return;
-    }
-    if (email === 'supervisor@sus.gov.br' && password === '1234') {
-      const supervisorUser: User = { name: 'Supervisor de Saude', email, password, role: 'supervisor' };
-      await AsyncStorage.setItem('current_user', JSON.stringify(supervisorUser));
-      setUser(supervisorUser);
-      return;
-    }
-    const stored = await AsyncStorage.getItem(`user_${email}`);
-    if (!stored) throw new Error('E-mail nao encontrado.');
-    const found: User = JSON.parse(stored);
+
+    const found = findUserByEmail(email);
+    if (!found) throw new Error('E-mail não encontrado.');
     if (found.password !== password) throw new Error('Senha incorreta.');
-    await AsyncStorage.setItem('current_user', JSON.stringify(found));
-    setUser(found);
+    const u = { name: found.name, email, role: found.role as UserRole };
+    await AsyncStorage.setItem('current_user', JSON.stringify(u));
+    setUser(u);
   };
 
   const signInAsRole = async (role: UserRole) => {
     const roleUsers: Record<UserRole, User> = {
-      paciente: { name: 'Paciente Demo', email: 'paciente@demo.com', password: '', role: 'paciente' },
-      gestor: { name: 'Gestor Demo', email: 'gestor@demo.com', password: '', role: 'gestor' },
-      supervisor: { name: 'Supervisor Demo', email: 'supervisor@demo.com', password: '', role: 'supervisor' },
-      admin: { name: 'Admin Demo', email: 'admin@demo.com', password: '', role: 'admin' },
+      paciente:   { name: 'Paciente Demo',   email: 'paciente@demo.com',   role: 'paciente' },
+      gestor:     { name: 'Gestor Demo',     email: 'gestor@demo.com',     role: 'gestor' },
+      supervisor: { name: 'Supervisor Demo', email: 'supervisor@demo.com', role: 'supervisor' },
+      admin:      { name: 'Admin Demo',      email: 'admin@demo.com',      role: 'admin' },
     };
-    const u = roleUsers[role];
-    await AsyncStorage.setItem('current_user', JSON.stringify(u));
-    setUser(u);
+    await AsyncStorage.setItem('current_user', JSON.stringify(roleUsers[role]));
+    setUser(roleUsers[role]);
   };
 
   const signOut = async () => {
@@ -89,10 +81,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const recoverAccess = async (email: string): Promise<string> => {
-    if (email === 'admin@sus.gov.br') return '1234';
-    const stored = await AsyncStorage.getItem(`user_${email}`);
-    if (!stored) throw new Error('E-mail nao encontrado.');
-    const found: User = JSON.parse(stored);
+    const demo = DEMO_USERS[email];
+    if (demo) return demo.password;
+    const found = findUserByEmail(email);
+    if (!found) throw new Error('E-mail não encontrado.');
     return found.password;
   };
 
