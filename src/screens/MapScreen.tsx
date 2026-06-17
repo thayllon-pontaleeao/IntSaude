@@ -1,32 +1,42 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  SafeAreaView, StatusBar, ActivityIndicator, ScrollView,
+  SafeAreaView, StatusBar, ActivityIndicator,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Location from 'expo-location';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList, Hospital, OccupancyLevel } from '../types';
+import { RootStackParamList } from '../types';
+import { getUnidades } from '../services/unidadesService';
 import { mockHospitals } from '../data/mockData';
 
 type Props = { navigation: NativeStackNavigationProp<RootStackParamList, 'Map'> };
 
-const occColors: Record<OccupancyLevel, string> = {
-  low: '#22c55e',
-  medium: '#f59e0b',
-  high: '#ef4444',
-};
+interface Unidade {
+  id: number | string;
+  nome?: string;
+  name?: string;
+  tipo?: string;
+  endereco?: string;
+  address?: string;
+  telefone?: string;
+  phone?: string;
+  latitude?: number;
+  longitude?: number;
+  lat?: number;
+  lng?: number;
+}
 
-const occLabels: Record<OccupancyLevel, string> = {
-  low: 'Baixa',
-  medium: 'Média',
-  high: 'Alta',
+const tipoColors: Record<string, string> = {
+  UBS: '#22c55e',
+  UPA: '#f59e0b',
+  Hospital: '#ef4444',
 };
 
 export default function MapScreen({ navigation }: Props) {
   const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [unidades, setUnidades] = useState<Unidade[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<Hospital | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -35,6 +45,14 @@ export default function MapScreen({ navigation }: Props) {
         const loc = await Location.getCurrentPositionAsync({});
         setUserLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
       }
+
+      try {
+        const data = await getUnidades();
+        setUnidades(data);
+      } catch (e) {
+        setUnidades(mockHospitals as any);
+      }
+
       setLoading(false);
     })();
   }, []);
@@ -42,42 +60,51 @@ export default function MapScreen({ navigation }: Props) {
   const lat = userLocation?.latitude ?? -15.7801;
   const lng = userLocation?.longitude ?? -47.9292;
 
-  const markers = mockHospitals.map(h => `
-    L.circleMarker([${h.lat}, ${h.lng}], {
-      radius: 10,
-      fillColor: '${occColors[h.occupancy]}',
-      color: '#fff',
-      weight: 2,
-      opacity: 1,
-      fillOpacity: 0.9
-    }).addTo(map).bindPopup('<b>${h.name}</b><br>Lotação: ${occLabels[h.occupancy]}<br>Espera: ~${h.waitTime} min');
-  `).join('\n');
+  const markers = unidades.map(u => {
+    const uLat = u.latitude ?? u.lat;
+    const uLng = u.longitude ?? u.lng;
+    const nome = (u.nome ?? u.name ?? '').replace(/'/g, "\\'");
+    const tipo = u.tipo ?? (u as any).occupancy ?? 'Hospital';
+    const end = (u.endereco ?? u.address ?? '').replace(/'/g, "\\'");
+    const tel = u.telefone ?? u.phone ?? '';
+    const cor = tipoColors[tipo] ?? '#ef4444';
+    return `
+      L.circleMarker([${uLat}, ${uLng}], {
+        radius: 10,
+        fillColor: '${cor}',
+        color: '#fff',
+        weight: 2,
+        opacity: 1,
+        fillOpacity: 0.9
+      }).addTo(map).bindPopup('<b>${nome}</b><br>${end}<br>Tel: ${tel}');
+    `;
+  }).join('\n');
 
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        #map { width: 100vw; height: 100vh; }
-      </style>
-    </head>
-    <body>
-      <div id="map"></div>
-      <script>
-        var map = L.map('map').setView([${lat}, ${lng}], 12);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: 'OpenStreetMap'
-        }).addTo(map);
-        ${userLocation ? `L.circleMarker([${lat}, ${lng}], { radius: 8, fillColor: '#3b82f6', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map).bindPopup('Você está aqui');` : ''}
-        ${markers}
-      </script>
-    </body>
-    </html>
-  `;
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; }
+    #map { width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var map = L.map('map', { zoomControl: true }).setView([${lat}, ${lng}], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: 'OpenStreetMap',
+      maxZoom: 18
+    }).addTo(map);
+    ${userLocation ? `L.circleMarker([${lat}, ${lng}], { radius: 8, fillColor: '#3b82f6', color: '#fff', weight: 2, fillOpacity: 1 }).addTo(map).bindPopup('Você está aqui');` : ''}
+    ${markers}
+  </script>
+</body>
+</html>`;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -94,17 +121,29 @@ export default function MapScreen({ navigation }: Props) {
       {loading ? (
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color="#1e3a5f" />
-          <Text style={styles.loadingText}>Obtendo sua localização...</Text>
+          <Text style={styles.loadingText}>Carregando unidades...</Text>
         </View>
       ) : (
-        <WebView source={{ html }} style={styles.map} />
+        <WebView
+          source={{ html }}
+          style={styles.map}
+          originWhitelist={['*']}
+          javaScriptEnabled
+          domStorageEnabled
+          startInLoadingState
+          renderLoading={() => (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="large" color="#1e3a5f" />
+            </View>
+          )}
+        />
       )}
 
       <View style={styles.legend}>
-        {([['low', '#22c55e', 'Baixa'], ['medium', '#f59e0b', 'Média'], ['high', '#ef4444', 'Alta']] as const).map(([key, color, label]) => (
-          <View key={key} style={styles.legendItem}>
+        {([['UBS', '#22c55e'], ['UPA', '#f59e0b'], ['Hospital', '#ef4444']] as const).map(([tipo, color]) => (
+          <View key={tipo} style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: color }]} />
-            <Text style={styles.legendText}>{label}</Text>
+            <Text style={styles.legendText}>{tipo}</Text>
           </View>
         ))}
       </View>

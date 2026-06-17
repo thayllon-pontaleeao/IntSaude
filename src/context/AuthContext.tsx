@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { setupDatabase, createUser, findUserByEmail } from '../lib/database';
+import { setupDatabase, findUserByEmail } from '../lib/database';
 import { UserRole } from '../types';
+import api from '../services/api';
 
 interface User {
   name: string;
@@ -40,11 +41,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signUp = async (name: string, email: string, password: string) => {
-    createUser(name, email, password);
-    const newUser = { name, email, role: 'paciente' as UserRole };
-    await AsyncStorage.setItem('current_user', JSON.stringify(newUser));
-    setUser(newUser);
-  };
+  try {
+    const response = await api.post('/auth/cadastro', {
+      nome: name,
+      email,
+      senha: password,
+    });
+    const { token, usuario } = response.data;
+    await AsyncStorage.setItem('api_token', token);
+    const u = { name: usuario.nome, email: usuario.email, role: 'paciente' as UserRole };
+    await AsyncStorage.setItem('current_user', JSON.stringify(u));
+    setUser(u);
+  } catch (error: any) {
+    console.log('Erro cadastro:', JSON.stringify(error?.response?.data));
+    const msg = error?.response?.data?.error;
+    throw new Error(msg || 'Erro ao cadastrar.');
+  }
+};
 
   const signIn = async (email: string, password: string) => {
     const demo = DEMO_USERS[email];
@@ -54,6 +67,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await AsyncStorage.setItem('current_user', JSON.stringify(u));
       setUser(u);
       return;
+    }
+
+    try {
+      const response = await api.post('/auth/login', { email, senha: password });
+      const { token, usuario } = response.data;
+      await AsyncStorage.setItem('api_token', token);
+      const u = { name: usuario.nome, email: usuario.email, role: 'paciente' as UserRole };
+      await AsyncStorage.setItem('current_user', JSON.stringify(u));
+      setUser(u);
+      return;
+    } catch (backendError: any) {
+      const msg = backendError?.response?.data?.error;
+      if (msg) throw new Error(msg);
     }
 
     const found = findUserByEmail(email);
@@ -77,6 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     await AsyncStorage.removeItem('current_user');
+    await AsyncStorage.removeItem('api_token');
     setUser(null);
   };
 
